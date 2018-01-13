@@ -10,7 +10,7 @@ module MysqlCookbook
 
     def configure_package_repositories
       # we need to enable the yum-mysql-community repository to get packages
-      return unless %w(rhel fedora).include? node['platform_family']
+      return unless %w(rhel fedora).include? node['platform_family'] or new_resource.version == '8.0'
       case parsed_version
       when '5.5'
         # Prefer packages from native repos
@@ -21,6 +21,8 @@ module MysqlCookbook
         include_recipe('yum-mysql-community::mysql56')
       when '5.7'
         include_recipe('yum-mysql-community::mysql57')
+      when '8.0'
+        include_recipe('hopper-repo::mysql_com-repo')
       end
     end
 
@@ -105,6 +107,11 @@ module MysqlCookbook
       true
     end
 
+    def v80plus
+      return false if parsed_version.split('.')[0].to_i < 8
+      true
+    end
+
     def password_column_name
       return 'authentication_string' if v57plus
       'password'
@@ -135,6 +142,16 @@ module MysqlCookbook
       cmd
     end
 
+    def mysqld_initialize_cmd_mysql8
+      cmd = mysqld_bin
+      cmd << " --defaults-file=#{etc_dir}/my.cnf"
+      cmd << ' --initialize-insecure'
+      cmd << " --datadir=#{parsed_data_dir}"
+      cmd << ' --explicit_defaults_for_timestamp'
+      cmd << " --init-file=/tmp/#{mysql_name}/my.sql"
+      cmd
+    end
+
     def mysql_install_db_cmd
       cmd = mysql_install_db_bin
       cmd << " --defaults-file=#{etc_dir}/my.cnf"
@@ -155,8 +172,32 @@ module MysqlCookbook
     end
 
     def db_init
+      return mysqld_initialize_cmd_mysql8 if v80plus
       return mysqld_initialize_cmd if v57plus
       mysql_install_db_cmd
+    end
+
+    def init_records_script_mysql8
+      <<-EOS
+        set -e
+        rm -rf /tmp/#{mysql_name}
+        mkdir /tmp/#{mysql_name}
+
+        cat > /tmp/#{mysql_name}/my.sql <<-EOSQL
+ALTER USER 'root'@'localhost' IDENTIFIED BY '#{root_password}';
+DELETE FROM mysql.user WHERE USER LIKE '';
+DELETE FROM mysql.user WHERE user = 'root' and host NOT IN ('127.0.0.1', 'localhost');
+FLUSH PRIVILEGES;
+DELETE FROM mysql.db WHERE db LIKE 'test%';
+DROP DATABASE IF EXISTS test;
+EOSQL
+
+       echo #{db_init} > /tmp/#{mysql_name}/db_init_cmd
+       #{db_init}
+
+       while [ -f #{pid_file} ] ; do sleep 1 ; done
+       rm -rf /tmp/#{mysql_name}
+       EOS
     end
 
     def init_records_script
@@ -170,8 +211,8 @@ UPDATE mysql.user SET #{password_column_name}=PASSWORD('#{root_password}')#{pass
 DELETE FROM mysql.user WHERE USER LIKE '';
 DELETE FROM mysql.user WHERE user = 'root' and host NOT IN ('127.0.0.1', 'localhost');
 FLUSH PRIVILEGES;
-DELETE FROM mysql.db WHERE db LIKE 'test%'
-DROP DATABASE IF EXISTS test ;
+DELETE FROM mysql.db WHERE db LIKE 'test%';
+DROP DATABASE IF EXISTS test;
 EOSQL
 
        #{db_init}
@@ -271,6 +312,8 @@ EOSQL
         @pkginfo.set['debian']['14.04']['5.5']['server_package'] = 'mysql-server-5.5'
         @pkginfo.set['debian']['14.04']['5.6']['client_package'] = %w(mysql-client-5.6 libmysqlclient-dev)
         @pkginfo.set['debian']['14.04']['5.6']['server_package'] = 'mysql-server-5.6'
+        @pkginfo.set['debian']['14.04']['8.0']['client_package'] = %w(mysql-client libmysqlclient-dev)
+        @pkginfo.set['debian']['14.04']['8.0']['server_package'] = 'mysql-server'
         @pkginfo.set['debian']['14.10']['5.5']['client_package'] = %w(mysql-client-5.5 libmysqlclient-dev)
         @pkginfo.set['debian']['14.10']['5.5']['server_package'] = 'mysql-server-5.5'
         @pkginfo.set['debian']['14.10']['5.6']['client_package'] = %w(mysql-client-5.6 libmysqlclient-dev)

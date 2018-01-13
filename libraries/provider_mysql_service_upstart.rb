@@ -6,7 +6,8 @@ class Chef
       if defined?(provides)
         provides :mysql_service, os: 'linux' do
           Chef::Platform::ServiceHelpers.service_resource_providers.include?(:upstart) &&
-            !Chef::Platform::ServiceHelpers.service_resource_providers.include?(:redhat)
+            !Chef::Platform::ServiceHelpers.service_resource_providers.include?(:redhat) &&
+            new_resource.version != '8.0'
         end
       end
 
@@ -98,6 +99,17 @@ class Chef
           provider Chef::Provider::Service::Upstart
           supports status: true
           action [:stop, :disable]
+        end
+
+        # DO-104
+        # mysql-8.0 package from mysql.com repo by default uses sysvinit instead of upstart
+        # Here we ensure that default mysql instance is stopped and disabled.
+        if mysql_version == '8.0'
+          service "#{new_resource.name} :create #{system_service_name}" do
+            service_name system_service_name
+            provider Chef::Provider::Service::Init::Debian
+            action [:stop, :disable]
+          end
         end
       end
 

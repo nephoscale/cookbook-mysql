@@ -32,6 +32,7 @@ class Chef
           package_name server_package_name
           version parsed_version if node['platform'] == 'smartos'
           version new_resource.package_version
+          options "-o Dpkg::Options::='--force-confdef'" if node['platform_family'] == 'debian'
           action new_resource.package_action
         end
 
@@ -142,11 +143,20 @@ class Chef
         end
 
         # initialize database and create initial records
-        bash "#{new_resource.name} :create initial records" do
-          code init_records_script
-          returns [0, 1, 2] # facepalm
-          not_if "/usr/bin/test -f #{parsed_data_dir}/mysql/user.frm"
-          action :run
+        if v80plus
+          bash "#{new_resource.name} :create initial records" do
+            code init_records_script_mysql8
+            returns [0, 1, 2] # facepalm
+            not_if "/usr/bin/test -f #{parsed_data_dir}/mysql.ibd"
+            action :run
+          end
+        else
+          bash "#{new_resource.name} :create initial records" do
+            code init_records_script
+            returns [0, 1, 2] # facepalm
+            not_if "/usr/bin/test -f #{parsed_data_dir}/mysql/user.frm"
+            action :run
+          end
         end
       end
 

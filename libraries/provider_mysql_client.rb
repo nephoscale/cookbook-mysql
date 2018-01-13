@@ -22,6 +22,7 @@ class Chef
             package_name p
             version new_resource.version if node['platform'] == 'smartos'
             version new_resource.package_version
+            options "-o Dpkg::Options::='--force-confdef'" if node['platform_family'] == 'debian'
             action :install
           end
         end
